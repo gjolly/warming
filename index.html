@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>50 years of daily temperatures</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main>
+    <header>
+      <div class="title-block">
+        <h1>50 years of daily temperatures</h1>
+        <p class="subtitle">Type a place. See every daily mean temperature there since 1976.</p>
+      </div>
+      <div class="search">
+        <input
+          id="q"
+          type="text"
+          placeholder="Search a city…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <ul id="results" class="results" role="listbox" hidden></ul>
+      </div>
+    </header>
+
+    <p id="status" class="status" aria-live="polite"></p>
+
+    <div id="chart" class="chart"></div>
+
+    <footer>
+      Data: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> ERA5 reanalysis.
+      Chart: <a href="https://github.com/leeoniya/uPlot" target="_blank" rel="noopener">uPlot</a>.
+    </footer>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
