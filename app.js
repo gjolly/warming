@@ -6,6 +6,24 @@
   const HEATWAVE_WINDOW = 10;
   const MIN_DAYS_PER_YEAR = 360;
 
+  // Storage keys + cache policy.
+  const CACHE_PREFIX = "warming:archive:";
+  const CACHE_MANIFEST = "warming:cache_manifest";
+  const LAST_PLACE_KEY = "warming:last_place";
+  const MAX_CACHE_ENTRIES = 6;
+
+  // Default place if nothing is saved yet. Lyon picked because its
+  // summer-peak warming trend is dramatic on both metrics we plot
+  // (~+0.9 °C/decade for both hottest day and peak 10-day heatwave),
+  // and it captures the 2003/2022/2025 European heatwaves cleanly.
+  const DEFAULT_PLACE = {
+    name: "Lyon",
+    admin1: "Auvergne-Rhône-Alpes",
+    country: "France",
+    latitude: 45.764,
+    longitude: 4.8357,
+  };
+
   const $q = document.getElementById("q");
   const $results = document.getElementById("results");
   const $status = document.getElementById("status");
@@ -115,14 +133,93 @@
     if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
   }
 
+  // --- Cache + last-place (localStorage) -------------------------------
+  // Cache key by lat/lon (3 decimals ≈ 110m). Manifest stores keys in
+  // LRU order so we can evict the oldest when over quota.
+
+  function cacheKey(place) {
+    return `${CACHE_PREFIX}${place.latitude.toFixed(3)},${place.longitude.toFixed(3)}`;
+  }
+
+  function loadCache(key) {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  }
+
+  function saveCache(key, payload) {
+    let manifest = [];
+    try { manifest = JSON.parse(localStorage.getItem(CACHE_MANIFEST) || "[]"); } catch {}
+    manifest = manifest.filter((k) => k !== key);
+    manifest.push(key);
+    while (manifest.length > MAX_CACHE_ENTRIES) {
+      localStorage.removeItem(manifest.shift());
+    }
+    const json = JSON.stringify(payload);
+    for (let i = 0; i < 5; i++) {
+      try {
+        localStorage.setItem(key, json);
+        localStorage.setItem(CACHE_MANIFEST, JSON.stringify(manifest));
+        return;
+      } catch {
+        // Quota — drop the oldest other entry and retry.
+        const victim = manifest.find((k) => k !== key);
+        if (!victim) return;
+        manifest = manifest.filter((k) => k !== victim);
+        localStorage.removeItem(victim);
+      }
+    }
+  }
+
+  function saveLastPlace(place) {
+    try { localStorage.setItem(LAST_PLACE_KEY, JSON.stringify(place)); } catch {}
+  }
+
+  function loadLastPlace() {
+    try {
+      const raw = localStorage.getItem(LAST_PLACE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  }
+
   // --- Fetch + render ---------------------------------------------------
+
+  function placeLabel(place) {
+    return [place.name, place.admin1, place.country].filter(Boolean).join(", ");
+  }
+
+  function renderTemps(label, times, temps, suffix) {
+    const yearly = aggregateByYear(times, temps, HEATWAVE_WINDOW);
+    if (yearly.length === 0) {
+      setStatus(`Not enough complete years of data for ${label}.`, true);
+      return false;
+    }
+    const trends = renderChart(yearly);
+    setStatus(
+      `${label} — ${yearly.length} full years (${yearly[0].year}–${yearly[yearly.length-1].year}). ` +
+      `Trends: hottest day ${fmtSlope(trends.hottest)}, peak 10-day ${fmtSlope(trends.peak)}${suffix}.`
+    );
+    return true;
+  }
 
   async function selectPlace(place) {
     $q.value = place.name;
     hideResults();
-    const label = [place.name, place.admin1, place.country].filter(Boolean).join(", ");
-    setStatus(`Loading temperatures for ${label}…`);
+    const label = placeLabel(place);
+    saveLastPlace(place);
 
+    const key = cacheKey(place);
+    const cached = loadCache(key);
+    if (cached && cached.times && cached.temps) {
+      if (renderTemps(label, cached.times, cached.temps, " (cached)")) {
+        // Touch manifest so this entry becomes most-recent.
+        saveCache(key, cached);
+        return;
+      }
+    }
+
+    setStatus(`Loading temperatures for ${label}…`);
     if (archiveAbort) archiveAbort.abort();
     archiveAbort = new AbortController();
 
@@ -142,17 +239,9 @@
         setStatus(`No historical data available for ${label}.`, true);
         return;
       }
-      const yearly = aggregateByYear(times, temps, HEATWAVE_WINDOW);
-      if (yearly.length === 0) {
-        setStatus(`Not enough complete years of data for ${label}.`, true);
-        return;
-      }
-      const trends = renderChart(yearly);
+      saveCache(key, { times, temps, fetchedAt: Date.now() });
       const dt = ((performance.now() - t0) / 1000).toFixed(1);
-      setStatus(
-        `${label} — ${yearly.length} full years (${yearly[0].year}–${yearly[yearly.length-1].year}). ` +
-        `Trends: hottest day ${fmtSlope(trends.hottest)}, peak 10-day ${fmtSlope(trends.peak)} (${dt}s).`
-      );
+      renderTemps(label, times, temps, ` (${dt}s)`);
     } catch (e) {
       if (e.name === "AbortError") return;
       setStatus(`Failed to load data: ${e.message}`, true);
@@ -330,4 +419,9 @@
     $status.textContent = msg;
     $status.classList.toggle("error", !!isError);
   }
+
+  // --- Boot ------------------------------------------------------------
+
+  const initial = loadLastPlace() || DEFAULT_PLACE;
+  selectPlace(initial);
 })();
