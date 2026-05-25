@@ -444,6 +444,7 @@
     }
 
     const sz = chartSize();
+    const isNarrow = window.innerWidth <= 720;
     const opts = {
       width: sz.width,
       height: sz.height,
@@ -485,7 +486,9 @@
       ],
       axes: [
         { stroke: colors.muted, grid: { stroke: colors.border } },
-        { label: "Temperature (°C)", stroke: colors.muted, grid: { stroke: colors.border } },
+        isNarrow
+          ? { stroke: colors.muted, grid: { stroke: colors.border }, size: 36, gap: 2 }
+          : { label: "Temperature (°C)", stroke: colors.muted, grid: { stroke: colors.border } },
       ],
     };
 
@@ -503,16 +506,18 @@
     // iOS Safari's collapsing URL bar correctly). Measure where .chart
     // starts and subtract the footer plus fixed reserves for the
     // chart-card padding, uPlot's legend, and breathing room.
+    // $chart fills the inner content box of .chart-card (which has the
+    // padding), so clientWidth is already the usable width. uPlot draws
+    // its axes inside that — no extra horizontal subtraction needed.
     const top = $chart.getBoundingClientRect().top;
     const footer = document.querySelector("footer");
     const footerH = footer ? footer.offsetHeight + 12 : 32;
-    const CHART_PADDING = 24;
     const LEGEND_RESERVE = 56;
     const BREATHE = 16;
     const viewportH = window.visualViewport?.height ?? window.innerHeight;
     const isNarrow = window.innerWidth <= 720;
     const minH = isNarrow ? 260 : 300;
-    const w = Math.max(280, $chart.clientWidth - CHART_PADDING);
+    const w = Math.max(280, $chart.clientWidth);
     const h = Math.max(
       minH,
       Math.floor(viewportH - top - footerH - LEGEND_RESERVE - BREATHE)

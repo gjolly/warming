@@ -302,6 +302,11 @@ html[data-theme="light"] .theme-toggle .icon-moon { display: inline; }
   color: var(--fg);
 }
 
+.chart-head h2 .unit {
+  font-weight: 500;
+  color: var(--muted);
+}
+
 .reset-zoom {
   appearance: none;
   background: transparent;
