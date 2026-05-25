@@ -10,6 +10,7 @@
   const CACHE_PREFIX = "warming:archive:";
   const CACHE_MANIFEST = "warming:cache_manifest";
   const LAST_PLACE_KEY = "warming:last_place";
+  const THEME_KEY = "warming:theme";
   const MAX_CACHE_ENTRIES = 6;
 
   // Default place if nothing is saved yet. Lyon picked because its
@@ -28,6 +29,11 @@
   const $results = document.getElementById("results");
   const $status = document.getElementById("status");
   const $chart = document.getElementById("chart");
+  const $kpis = document.getElementById("kpis");
+  const $kpiHottest = document.getElementById("kpi-hottest");
+  const $kpiPeak = document.getElementById("kpi-peak");
+  const $resetZoom = document.getElementById("reset-zoom");
+  const $themeToggle = document.getElementById("theme-toggle");
 
   let geoAbort = null;
   let archiveAbort = null;
@@ -35,6 +41,41 @@
   let activeIdx = -1;
   let currentResults = [];
   let plot = null;
+  let lastYearly = null;
+
+  // --- Theme ------------------------------------------------------------
+
+  function applyStoredTheme() {
+    let stored = null;
+    try { stored = localStorage.getItem(THEME_KEY); } catch {}
+    if (stored === "light" || stored === "dark") {
+      document.documentElement.dataset.theme = stored;
+    } else {
+      delete document.documentElement.dataset.theme;
+    }
+  }
+
+  function currentTheme() {
+    const set = document.documentElement.dataset.theme;
+    if (set === "light" || set === "dark") return set;
+    return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+
+  $themeToggle.addEventListener("click", () => {
+    const next = currentTheme() === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem(THEME_KEY, next); } catch {}
+    if (lastYearly) renderChart(lastYearly);
+  });
+
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    // Only act on OS change if user hasn't picked an override.
+    let stored = null;
+    try { stored = localStorage.getItem(THEME_KEY); } catch {}
+    if (!stored && lastYearly) renderChart(lastYearly);
+  });
+
+  applyStoredTheme();
 
   // --- Autocomplete -----------------------------------------------------
 
@@ -81,7 +122,7 @@
       renderResults(data.results || []);
     } catch (e) {
       if (e.name === "AbortError") return;
-      setStatus(`Search failed: ${e.message}`, true);
+      setStatus(`Search failed: ${e.message}`, { error: true });
     }
   }
 
@@ -90,13 +131,14 @@
     activeIdx = -1;
     if (results.length === 0) {
       $results.innerHTML = '<li class="empty">No matches</li>';
-      $results.hidden = false;
+      showResults();
       return;
     }
     $results.innerHTML = "";
     results.forEach((r, i) => {
       const li = document.createElement("li");
       li.setAttribute("role", "option");
+      li.id = `result-${i}`;
       li.dataset.idx = String(i);
       const name = document.createElement("span");
       name.className = "place-name";
@@ -110,11 +152,18 @@
       li.addEventListener("mouseenter", () => setActive(i));
       $results.appendChild(li);
     });
+    showResults();
+  }
+
+  function showResults() {
     $results.hidden = false;
+    $q.setAttribute("aria-expanded", "true");
   }
 
   function hideResults() {
     $results.hidden = true;
+    $q.setAttribute("aria-expanded", "false");
+    $q.removeAttribute("aria-activedescendant");
     activeIdx = -1;
   }
 
@@ -130,7 +179,10 @@
       el.classList.toggle("active", idx === i);
     });
     const el = $results.children[i];
-    if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+    if (el) {
+      if (el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+      if (el.id) $q.setAttribute("aria-activedescendant", el.id);
+    }
   }
 
   // --- Cache + last-place (localStorage) -------------------------------
@@ -189,16 +241,16 @@
     return [place.name, place.admin1, place.country].filter(Boolean).join(", ");
   }
 
-  function renderTemps(label, times, temps, suffix) {
+  function renderTemps(label, times, temps, opts = {}) {
     const yearly = aggregateByYear(times, temps, HEATWAVE_WINDOW);
     if (yearly.length === 0) {
-      setStatus(`Not enough complete years of data for ${label}.`, true);
+      setStatus(`Not enough complete years of data for ${label}.`, { error: true });
       return false;
     }
-    const trends = renderChart(yearly);
+    renderChart(yearly);
     setStatus(
-      `${label} — ${yearly.length} full years (${yearly[0].year}–${yearly[yearly.length-1].year}). ` +
-      `Trends: hottest day ${fmtSlope(trends.hottest)}, peak 10-day ${fmtSlope(trends.peak)}${suffix}.`
+      `${label} — ${yearly.length} full years (${yearly[0].year}–${yearly[yearly.length-1].year})`,
+      opts
     );
     return true;
   }
@@ -212,14 +264,14 @@
     const key = cacheKey(place);
     const cached = loadCache(key);
     if (cached && cached.times && cached.temps) {
-      if (renderTemps(label, cached.times, cached.temps, " (cached)")) {
+      if (renderTemps(label, cached.times, cached.temps, { cached: true })) {
         // Touch manifest so this entry becomes most-recent.
         saveCache(key, cached);
         return;
       }
     }
 
-    setStatus(`Loading temperatures for ${label}…`);
+    setStatus(`Loading temperatures for ${label}…`, { loading: true });
     if (archiveAbort) archiveAbort.abort();
     archiveAbort = new AbortController();
 
@@ -236,15 +288,15 @@
       const times = data?.daily?.time;
       const temps = data?.daily?.temperature_2m_mean;
       if (!times?.length || !temps?.length) {
-        setStatus(`No historical data available for ${label}.`, true);
+        setStatus(`No historical data available for ${label}.`, { error: true });
         return;
       }
       saveCache(key, { times, temps, fetchedAt: Date.now() });
       const dt = ((performance.now() - t0) / 1000).toFixed(1);
-      renderTemps(label, times, temps, ` (${dt}s)`);
+      renderTemps(label, times, temps, { timing: `${dt}s` });
     } catch (e) {
       if (e.name === "AbortError") return;
-      setStatus(`Failed to load data: ${e.message}`, true);
+      setStatus(`Failed to load data: ${e.message}`, { error: true });
     }
   }
 
@@ -320,9 +372,55 @@
     return `${sign}${Math.abs(perDecade).toFixed(2)} °C/decade`;
   }
 
+  // --- KPI cards -------------------------------------------------------
+
+  function renderKpis(yearly, regH, regP) {
+    const yrStart = yearly[0].year;
+    const yrEnd = yearly[yearly.length - 1].year;
+    const range = `${yrStart}–${yrEnd}`;
+
+    $kpiHottest.innerHTML = "";
+    const lh = document.createElement("p");
+    lh.className = "kpi-label";
+    lh.textContent = "Hottest day trend";
+    const vh = document.createElement("div");
+    vh.className = "kpi-value";
+    vh.textContent = fmtSlope(regH.slope);
+    const sh = document.createElement("p");
+    sh.className = "kpi-sub";
+    sh.textContent = `Annual maximum, ${range}`;
+    $kpiHottest.append(lh, vh, sh);
+
+    $kpiPeak.innerHTML = "";
+    const lp = document.createElement("p");
+    lp.className = "kpi-label";
+    lp.textContent = "Peak 10-day mean trend";
+    const vp = document.createElement("div");
+    vp.className = "kpi-value";
+    vp.textContent = fmtSlope(regP.slope);
+    const sp = document.createElement("p");
+    sp.className = "kpi-sub";
+    sp.textContent = `Hottest 10-day window, ${range}`;
+    $kpiPeak.append(lp, vp, sp);
+
+    $kpis.hidden = false;
+  }
+
   // --- Chart -----------------------------------------------------------
 
+  function themeColors() {
+    const cs = getComputedStyle(document.documentElement);
+    return {
+      accent: cs.getPropertyValue("--accent").trim() || "#d4421e",
+      accentSoft: cs.getPropertyValue("--accent-soft").trim() || "rgba(80,130,200,0.95)",
+      muted: cs.getPropertyValue("--muted").trim() || "#6b6b6b",
+      border: cs.getPropertyValue("--border").trim() || "#d8d6d0",
+    };
+  }
+
   function renderChart(yearly) {
+    lastYearly = yearly;
+    const colors = themeColors();
     const years = yearly.map((r) => r.year);
     const xs = new Float64Array(yearly.length);
     const hottest = new Array(yearly.length);
@@ -338,6 +436,8 @@
     const peakTrend = years.map((y) => regP.intercept + regP.slope * y);
     const data = [xs, hottest, hottestTrend, peak, peakTrend];
 
+    renderKpis(yearly, regH, regP);
+
     if (plot) {
       plot.destroy();
       plot = null;
@@ -351,73 +451,115 @@
       legend: { show: true },
       cursor: {
         drag: { x: true, y: false, uni: 10 },
+        // uPlot 1.6: enable single-finger touch drag for X-axis zoom.
+        touch: { x: true, y: false },
       },
       series: [
         { label: "Year" },
         {
           label: "Hottest day (°C)",
-          stroke: "#d4421e",
+          stroke: colors.accent,
           width: 1.5,
-          points: { show: true, size: 5, fill: "#d4421e" },
+          points: { show: true, size: 5, fill: colors.accent },
         },
         {
           label: `Hottest day trend (${fmtSlope(regH.slope)})`,
-          stroke: "#d4421e",
+          stroke: colors.accent,
           width: 2,
           dash: [6, 4],
           points: { show: false },
         },
         {
           label: "Peak 10-day mean (°C)",
-          stroke: "rgba(80, 130, 200, 0.85)",
+          stroke: colors.accentSoft,
           width: 2,
-          points: { show: true, size: 6, fill: "rgba(80, 130, 200, 0.85)" },
+          points: { show: true, size: 6, fill: colors.accentSoft },
         },
         {
           label: `Peak 10-day trend (${fmtSlope(regP.slope)})`,
-          stroke: "rgba(80, 130, 200, 0.95)",
+          stroke: colors.accentSoft,
           width: 2,
           dash: [6, 4],
           points: { show: false },
         },
       ],
       axes: [
-        {},
-        { label: "Temperature (°C)" },
+        { stroke: colors.muted, grid: { stroke: colors.border } },
+        { label: "Temperature (°C)", stroke: colors.muted, grid: { stroke: colors.border } },
       ],
     };
 
     plot = new uPlot(opts, data, $chart);
+    $resetZoom.hidden = false;
     return { hottest: regH.slope, peak: regP.slope };
   }
 
+  $resetZoom.addEventListener("click", () => {
+    if (plot) plot.setScale("x", { min: null, max: null });
+  });
+
   function chartSize() {
-    // Fit the canvas into the remaining viewport: measure where .chart
-    // starts, subtract the footer's actual height, plus fixed reserves
-    // for chart-card padding, uPlot's legend, and breathing room.
+    // Fit the canvas into the visible viewport (visualViewport handles
+    // iOS Safari's collapsing URL bar correctly). Measure where .chart
+    // starts and subtract the footer plus fixed reserves for the
+    // chart-card padding, uPlot's legend, and breathing room.
     const top = $chart.getBoundingClientRect().top;
     const footer = document.querySelector("footer");
     const footerH = footer ? footer.offsetHeight + 12 : 32;
     const CHART_PADDING = 24;
     const LEGEND_RESERVE = 56;
     const BREATHE = 16;
-    const w = Math.max(320, $chart.clientWidth - CHART_PADDING);
+    const viewportH = window.visualViewport?.height ?? window.innerHeight;
+    const isNarrow = window.innerWidth <= 720;
+    const minH = isNarrow ? 260 : 300;
+    const w = Math.max(280, $chart.clientWidth - CHART_PADDING);
     const h = Math.max(
-      300,
-      Math.floor(window.innerHeight - top - footerH - LEGEND_RESERVE - BREATHE)
+      minH,
+      Math.floor(viewportH - top - footerH - LEGEND_RESERVE - BREATHE)
     );
     return { width: w, height: h };
   }
 
-  window.addEventListener("resize", () => {
-    if (plot) plot.setSize(chartSize());
-  });
+  let resizeRaf = 0;
+  function onViewportChange() {
+    if (resizeRaf) cancelAnimationFrame(resizeRaf);
+    resizeRaf = requestAnimationFrame(() => {
+      resizeRaf = 0;
+      if (plot) plot.setSize(chartSize());
+    });
+  }
+  window.addEventListener("resize", onViewportChange);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", onViewportChange);
+  }
 
   // --- Status ----------------------------------------------------------
 
-  function setStatus(msg, isError = false) {
-    $status.textContent = msg;
-    $status.classList.toggle("error", !!isError);
+  function setStatus(msg, opts = {}) {
+    const isError = !!opts.error;
+    const isLoading = !!opts.loading;
+    const cached = !!opts.cached;
+    const timing = opts.timing || null;
+
+    $status.innerHTML = "";
+    const text = document.createElement("span");
+    text.textContent = msg;
+    $status.appendChild(text);
+
+    if (cached) {
+      const b = document.createElement("span");
+      b.className = "badge";
+      b.textContent = "cached";
+      $status.appendChild(b);
+    }
+    if (timing) {
+      const b = document.createElement("span");
+      b.className = "badge";
+      b.textContent = timing;
+      $status.appendChild(b);
+    }
+    $status.classList.toggle("error", isError);
+    $chart.classList.toggle("loading", isLoading);
   }
 
   // --- Boot ------------------------------------------------------------

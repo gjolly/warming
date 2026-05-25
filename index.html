@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light dark" />
   <title>50 years of daily temperatures</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css" />
   <link rel="stylesheet" href="styles.css" />
@@ -14,21 +15,57 @@
         <h1>50 years of daily temperatures</h1>
         <p class="subtitle">Type a place. See every daily mean temperature there since 1976.</p>
       </div>
-      <div class="search">
-        <input
-          id="q"
-          type="text"
-          placeholder="Search a city…"
-          autocomplete="off"
-          spellcheck="false"
-        />
-        <ul id="results" class="results" role="listbox" hidden></ul>
+      <div class="header-actions">
+        <div class="search">
+          <label for="q" class="visually-hidden">Search a city</label>
+          <input
+            id="q"
+            type="text"
+            placeholder="Search a city…"
+            autocomplete="off"
+            spellcheck="false"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded="false"
+            aria-controls="results"
+          />
+          <ul id="results" class="results" role="listbox" hidden></ul>
+        </div>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme" title="Toggle theme">
+          <svg class="icon-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <circle cx="12" cy="12" r="4" fill="currentColor"/>
+            <g stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <line x1="12" y1="2"  x2="12" y2="5"/>
+              <line x1="12" y1="19" x2="12" y2="22"/>
+              <line x1="2"  y1="12" x2="5"  y2="12"/>
+              <line x1="19" y1="12" x2="22" y2="12"/>
+              <line x1="4.2"  y1="4.2"  x2="6.3"  y2="6.3"/>
+              <line x1="17.7" y1="17.7" x2="19.8" y2="19.8"/>
+              <line x1="4.2"  y1="19.8" x2="6.3"  y2="17.7"/>
+              <line x1="17.7" y1="6.3"  x2="19.8" y2="4.2"/>
+            </g>
+          </svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" fill="currentColor"/>
+          </svg>
+        </button>
       </div>
     </header>
 
     <p id="status" class="status" aria-live="polite"></p>
 
-    <div id="chart" class="chart"></div>
+    <div class="kpis" id="kpis" hidden>
+      <div class="kpi-card kpi-hottest" id="kpi-hottest"></div>
+      <div class="kpi-card kpi-peak" id="kpi-peak"></div>
+    </div>
+
+    <section class="chart-card" aria-labelledby="chart-title">
+      <div class="chart-head">
+        <h2 id="chart-title">Daily temperature peaks</h2>
+        <button id="reset-zoom" class="reset-zoom" type="button" hidden>Reset zoom</button>
+      </div>
+      <div id="chart" class="chart"></div>
+    </section>
 
     <footer>
       Data: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> ERA5 reanalysis.
